@@ -1,0 +1,174 @@
+.appShell {
+  min-height: 100vh;
+  padding: 12px;
+  box-sizing: border-box;
+}
+
+.threePane {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  height: calc(100vh - 24px);
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.pane {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--panel-bg);
+  overflow: hidden;
+}
+
+.paneHeader {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.paneTitle {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+}
+
+.paneTools {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.paneButton {
+  border: 1px solid var(--border);
+  background: var(--panel-bg);
+  color: var(--text);
+  border-radius: 8px;
+  padding: 6px 10px;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.paneButton:hover {
+  background: rgba(17, 24, 39, 0.03);
+}
+
+.paneBody {
+  padding: 10px 12px;
+  overflow: auto;
+  flex: 1;
+  min-height: 0;
+}
+
+.tree {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.treeItem + .treeItem {
+  margin-top: 8px;
+}
+
+.treeRow {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+}
+
+.treeBullet {
+  width: 6px;
+  height: 6px;
+  margin-top: 0.6em;
+  border-radius: 999px;
+  background: var(--text-muted-2);
+  flex: 0 0 auto;
+}
+
+.treeText {
+  min-width: 0;
+  word-break: break-word;
+}
+
+.treeEditor {
+  outline: none;
+  border-radius: 6px;
+  padding: 2px 4px;
+  margin: -2px -4px;
+}
+
+.treeEditor:focus {
+  box-shadow: 0 0 0 2px rgba(17, 24, 39, 0.15);
+}
+
+.treeEditor:empty::before {
+  content: attr(data-placeholder);
+  color: var(--text-muted-2);
+}
+
+.treeRow--checkbox {
+  gap: 10px;
+}
+
+.treeCheckbox {
+  margin-top: 0.15em;
+  flex: 0 0 auto;
+}
+
+.treeItem > .tree {
+  margin-top: 8px;
+  margin-left: 10px;
+  padding-left: 12px;
+  border-left: 1px solid var(--border);
+}
+
+.pane[data-horizon='min'] .treeCheckbox {
+  accent-color: var(--text);
+}
+
+.pane[data-horizon='min'] .treeCheckbox:checked + .treeText,
+.pane[data-horizon='min'] .treeItem[data-completed='true'] .treeText {
+  text-decoration: line-through;
+  color: var(--text-muted-2);
+}
+
+.exportPanel {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.exportActions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.exportStatus {
+  font-size: 12px;
+  color: var(--text-muted);
+  min-height: 1em;
+}
+
+.exportText {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px;
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--text);
+  background: rgba(17, 24, 39, 0.02);
+  resize: vertical;
+}

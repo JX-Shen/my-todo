@@ -1,0 +1,184 @@
+# Decisions Registry
+
+**Generated**: 2025-12-22  
+**Source**: `.ai/archive/FEATURE-001/`  
+**Format**: YAML (machine-readable)  
+**Review**: Manually by GOV before major changes
+
+---
+
+decisions:
+
+  - id: "GOV-2025-12-21-001"
+    title: "Semantic Snapshot Testing for Durability Assertions"
+    date: "2025-12-21"
+    status: "APPROVED"
+    scope: "All features with durability/persistence requirements"
+    effective_from: "FEATURE-002"
+    reversible: true
+    
+    context: |
+      QA-006 (durability: Reload + Reopen) exhibited intermittent MIXED/FAIL results despite no actual data loss.
+      Root cause: test harness compared raw DOM innerHTML strings, which change across browser re-serialization.
+      Example: checkbox HTML gains checked="" attribute without semantic change.
+    
+    principle: |
+      Test behavior and semantic state, not implementation details (DOM serialization).
+      Browsers/frameworks legitimately change HTML representation without changing meaning.
+    
+    decision: |
+      1. All features with state persistence must design semantic snapshot functions.
+      2. Snapshot functions walk data model and return structured state (ignoring serialization artifacts).
+      3. QA harness compares JSON.stringify(snapshot) before vs after Reload/Reopen.
+      4. Never compare raw DOM/HTML strings for durability assertions.
+    
+    rationale: |
+      - Eliminates flaky tests caused by serialization variance.
+      - Makes tests future-proof against framework/browser changes.
+      - Zero false negatives: actual data loss would still be caught.
+      - Pattern is simple and reusable across features.
+    
+    impact: |
+      - PM_to_Dev must specify semantic snapshot design if persistence in scope.
+      - DEV must expose semantic snapshot function for QA.
+      - GOV will require semantic testing approach in approval.
+      - All future durability tests follow this pattern.
+    
+    rollback_plan: |
+      Guidance only; no code lock-in. If a feature finds semantic snapshots insufficient,
+      escalate to GOV for review before deviating.
+    
+    references:
+      - document: "GOV-decision-durability-testing.md"
+        location: ".ai/archive/FEATURE-001/"
+        status: "Full decision record with implementation steps"
+      - document: "QA-006 post-mortem"
+        location: ".ai/archive/FEATURE-001/GOV-conclusion-QA-lessons.md"
+        status: "Detailed analysis of flakiness and lessons learned"
+      - example: "FEATURE-001 QA hook"
+        location: "my-todo/src/App.jsx"
+        detail: "window.__MVP_QA__.semanticSnapshotFromDom()"
+
+  - id: "GOV-2025-12-21-002"
+    title: "QA Testing Standards (Reusable Patterns)"
+    date: "2025-12-21"
+    status: "APPROVED"
+    scope: "All features with QA/durability/keyboard/formatting/export requirements"
+    effective_from: "FEATURE-002"
+    reversible: true
+    
+    context: |
+      FEATURE-001 identified six categories of testing that require careful pattern selection to avoid
+      testing implementation details (which break on framework/browser changes) instead of behavior.
+    
+    principle: |
+      Test intent and behavior, not framework/browser implementation details.
+    
+    decision: |
+      Codify 6 QA patterns as organizational standard:
+      1. Durability / Persistence: semantic snapshots (JSON equality)
+      2. Keyboard Interaction: behavior outcome (action → result), not event internals
+      3. Formatting / Rich Content: canonical HTML representation, not raw serialization
+      4. Completion / Toggles: DOM properties (e.g., .checked), not attributes
+      5. Undo/Redo: full state restoration, not history structure
+      6. Export / Integration: parsed structure, not textual equality
+    
+    rationale: |
+      - Each pattern emerged from FEATURE-001 lessons (QA-006 flakiness).
+      - Patterns are framework/browser-agnostic.
+      - Allows future refactoring without breaking tests.
+      - Low implementation cost; high reliability gain.
+    
+    impact: |
+      - QA team references patterns in all features.
+      - Dev team designs QA from pattern templates.
+      - PM team specifies QA approach using pattern language.
+      - GOV approves feature QA only if patterns applied.
+    
+    rollback_plan: |
+      Patterns are guidance; no code changes required. If a pattern proves insufficient,
+      escalate with evidence to GOV for review and potential pattern update.
+    
+    references:
+      - document: "QA-standards-semantic-testing.md"
+        location: ".ai/archive/FEATURE-001/"
+        status: "Full standards with examples, checklists, and anti-patterns"
+
+  - id: "CHARTER-2025-12-21-001"
+    title: "Project Charter (MVP Scope)"
+    date: "2025-12-21"
+    status: "ACTIVE"
+    scope: "Project-wide"
+    effective_from: "Ongoing"
+    reversible: false
+    
+    context: |
+      Three-list personal task tool (90+ days / 30 days / Minimum todo).
+      Single-user, local-only, keyboard-first, minimal formatting, durable.
+    
+    principle: |
+      Calm, reliable, keyboard-first task capture and organization.
+      Anti-Notion: no accounts, collaboration, tags, filters, databases, multi-view.
+    
+    decision: |
+      1. Scope: 3 lists + nested structure + keyboard editing + completion + durability + export.
+      2. Non-goals: accounts, tags, databases, kanban/calendar, rich blocks.
+      3. Trade-offs: speed/simplicity over richness/flexibility.
+      4. Constraints: single-user, minimal formatting (bold/italic only), keyboard-first.
+    
+    rationale: |
+      - Matches target user workflow (daily capture, weekly review).
+      - Minimizes feature creep by explicit non-goals.
+      - Prioritizes reliability and daily use over extensibility.
+    
+    impact: |
+      - All features in future must align with scope/non-goals.
+      - Drift checks mandatory (BA § 9, GOV review).
+      - Scope changes require charter amendment and decision record.
+    
+    rollback_plan: |
+      Charter is project anchor; changes require human leader approval.
+    
+    references:
+      - document: "charter.md"
+        location: ".ai/"
+        status: "Active project definition"
+
+---
+
+## Registry Metadata
+
+| Field | Value |
+|-------|-------|
+| **Total Decisions** | 3 (2 governance + 1 charter) |
+| **Approved** | 3 |
+| **Active** | 3 |
+| **Effective FEATURE-002+** | 2 |
+| **Last Updated** | 2025-12-22 |
+| **Maintained By** | GOV |
+
+---
+
+## How to Use
+
+### As a Feature Team
+1. Before starting PM_to_Dev, check if any decisions apply to your scope.
+2. If you have persistence/durability: see GOV-2025-12-21-001 and GOV-2025-12-21-002.
+3. All features: check charter (CHARTER-2025-12-21-001) for non-goals and scope.
+
+### As GOV (Review)
+1. Check decisions.yml before approving Dev_to_Gov.
+2. If durability in scope: require semantic snapshot approach (GOV-2025-12-21-001).
+3. If QA design specified: verify it applies one of 6 patterns (GOV-2025-12-21-002).
+4. If charter scope unclear: reference CHARTER-2025-12-21-001.
+
+### Adding a New Decision
+1. Create decision in `.ai/archive/FEATURE-###/` with full context.
+2. Add entry to this registry (copy template format).
+3. Set `status: "APPROVED"` only if GOV has signed off.
+4. Set `effective_from: "FEATURE-N"` if applicable.
+
+---
+
+**Generated by**: GOV  
+**Regenerate**: `GOV: regenerate decisions`

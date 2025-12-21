@@ -1,0 +1,116 @@
+# Project Navigation Index
+
+**Last Generated**: 2025-12-22  
+**Source**: `.ai/charter.md`, `.ai/archive/FEATURE-001/`, `.ai/handoffs/`  
+**Status**: FEATURE-001 complete; FEATURE-002 ready to start
+
+---
+
+## Quick Links
+
+### Project Definition (Always Start Here)
+- **[charter.md](../charter.md)** — Project scope, north star, trade-offs, constraints, decision protocol
+
+### Current Work
+- **[BA_to_PM.md](../handoffs/BA_to_PM.md)** — [Status: Draft] Next feature problem definition (template)
+- **[PM_to_Dev.md](../handoffs/PM_to_Dev.md)** — [Status: Draft] Next feature execution spec (template)
+- **[Dev_to_Gov.md](../handoffs/Dev_to_Gov.md)** — [Status: Draft] Next feature implementation & verification (template)
+
+### Completed Features
+- **[FEATURE-001 Archive](../archive/FEATURE-001/)** — Three-list personal task tool (MVP)
+  - [BA_to_PM.md](../archive/FEATURE-001/BA_to_PM.md) — Problem definition
+  - [PM_to_Dev.md](../archive/FEATURE-001/PM_to_Dev.md) — Execution spec (10 acceptance tests)
+  - [Dev_to_Gov.md](../archive/FEATURE-001/Dev_to_Gov.md) — Implementation & evidence
+  - [gov-review.md](../archive/FEATURE-001/gov-review.md) — GOV approval & traceability check
+  - [README.md](../archive/FEATURE-001/README.md) — Feature summary & statistics
+
+---
+
+## Governance Standards & Decisions
+
+### Standards (Reusable Patterns)
+- **[QA-standards-semantic-testing.md](../archive/FEATURE-001/QA-standards-semantic-testing.md)** — Testing best practices (durability, keyboard, formatting, etc.)
+
+### Decisions (Policy & Governance)
+- **[GOV-decision-durability-testing.md](../archive/FEATURE-001/GOV-decision-durability-testing.md)** — Semantic snapshot testing for persistence (APPROVED, FEATURE-002+)
+- **[GOV-conclusion-QA-lessons.md](../archive/FEATURE-001/GOV-conclusion-QA-lessons.md)** — QA-006 flakiness analysis & lessons learned
+
+---
+
+## How to Use This Index
+
+### I'm Starting a New Feature
+1. Read: `charter.md` (project context)
+2. Read: `AGENTS.md` (governance framework)
+3. As BA: Create/edit `BA_to_PM.md` with new feature problem definition
+4. Ref: `FEATURE-001/README.md` (example of completed handoff cycle)
+
+### I'm Joining Mid-Feature
+1. Read: Current `BA_to_PM.md`, `PM_to_Dev.md`, or `Dev_to_Gov.md` (status in header)
+2. Ref: `FEATURE-001/` for equivalent completed phase
+3. Check: Status machine rules in `AGENTS.md` §3
+
+### I'm Designing QA for a Feature with Persistence
+1. Read: `QA-standards-semantic-testing.md` (durability section)
+2. Ref: `GOV-decision-durability-testing.md` (approved pattern)
+3. Design: Semantic snapshot function (similar to `window.__MVP_QA__.semanticSnapshotFromDom()`)
+4. Assert: JSON equality of semantic snapshots, not DOM strings
+
+### I'm Reviewing a Feature as GOV
+1. Checklist: `GOV-decision-durability-testing.md` (if persistence in scope)
+2. Traceability: SC ↔ AT ↔ Evidence (see `FEATURE-001/gov-review.md`)
+3. Drift: Against charter non-goals and drift alarms
+4. Risk: Top 3 risks & mitigations (see `FEATURE-001/gov-review.md` as example)
+
+---
+
+## File Structure
+
+```
+.ai/
+├─ charter.md                                    # Project anchor (READ FIRST)
+├─ handoffs/
+│  ├─ BA_to_PM.md                              # [Draft] Next feature
+│  ├─ PM_to_Dev.md                             # [Draft] Next feature
+│  └─ Dev_to_Gov.md                            # [Draft] Next feature
+├─ archive/
+│  └─ FEATURE-001/
+│     ├─ BA_to_PM.md                           # Problem definition
+│     ├─ PM_to_Dev.md                          # Execution spec (10 AT)
+│     ├─ Dev_to_Gov.md                         # Implementation
+│     ├─ gov-review.md                         # GOV approval
+│     ├─ README.md                             # Summary & stats
+│     ├─ GOV-decision-durability-testing.md    # Standard: semantic snapshots
+│     ├─ GOV-conclusion-QA-lessons.md          # Lesson: test behavior not impl
+│     └─ QA-standards-semantic-testing.md      # Standards: 6 QA patterns
+└─ generated/
+   ├─ INDEX.md                                 # This file (navigation)
+   ├─ standards.md                             # Standards view (derived)
+   └─ decisions.yml                            # Decisions registry (derived)
+```
+
+---
+
+## Status
+
+| Item | Status | Details |
+|------|--------|---------|
+| **Project Charter** | ✓ Active | `.ai/charter.md` (MVP scope: 3-list task tool) |
+| **FEATURE-001** | ✓ Complete | Archive ready; 7 documents |
+| **FEATURE-002** | → Ready | Working handoffs reset to templates |
+| **QA Standards** | ✓ Approved | Semantic testing (durability, keyboard, etc.) |
+| **Governance** | ✓ Active | 2 decisions recorded; applicable to all features |
+
+---
+
+## For Next Team
+
+- Working handoffs are templates (FEATURE-###, Status: Draft)
+- Apply QA-standards-semantic-testing.md if your feature has persistence
+- Reference GOV-decision-durability-testing.md in PM_to_Dev if scope includes durability
+- Archive pattern from FEATURE-001 (README.md shows what to expect)
+
+---
+
+**Generated by**: GOV  
+**Regenerate**: `GOV: regenerate index`
