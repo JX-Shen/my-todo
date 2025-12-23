@@ -10,6 +10,12 @@ const HORIZONS = [
 const MAX_HISTORY = 200
 const STORAGE_KEY = 'minimal-todo:v1'
 const STORAGE_VERSION = 1
+const APP_STATE_VERSION = 1
+const MAX_BACKUPS = 30
+const BACKUP_STORAGE_KEY = 'minimal-todo:backups'
+const BACKUP_DB_NAME = 'minimal-todo-backups'
+const BACKUP_STORE = 'snapshots'
+const MAX_BACKUP_BYTES = 4_000_000
 
 function makeId() {
   if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID()
@@ -100,26 +106,62 @@ function normalizeDoc(rawDoc) {
   }
 }
 
+function parseUpdatedAt(value) {
+  if (typeof value === 'number' && Number.isFinite(value)) return value
+  if (typeof value === 'string') {
+    const parsed = Date.parse(value)
+    if (!Number.isNaN(parsed)) return parsed
+  }
+  return null
+}
+
+function buildAppState(doc, updatedAt, metaOverrides = {}) {
+  return {
+    version: APP_STATE_VERSION,
+    updatedAt: new Date(updatedAt).toISOString(),
+    todos: doc,
+    meta: {
+      source: 'minimal-todo',
+      ...metaOverrides,
+    },
+  }
+}
+
 function loadPersistedDoc() {
   try {
     const raw = globalThis.localStorage?.getItem(STORAGE_KEY)
     if (!raw) return null
     const parsed = JSON.parse(raw)
     if (!parsed || parsed.version !== STORAGE_VERSION) return null
-    return normalizeDoc(parsed.doc)
+    if (parsed.todos) {
+      const normalized = normalizeDoc(parsed.todos)
+      if (!normalized) return null
+      return {
+        doc: normalized,
+        updatedAt: parseUpdatedAt(parsed.updatedAt) ?? Date.now(),
+      }
+    }
+    const normalized = normalizeDoc(parsed.doc)
+    if (!normalized) return null
+    return {
+      doc: normalized,
+      updatedAt: parseUpdatedAt(parsed.savedAt) ?? Date.now(),
+    }
   } catch {
     return null
   }
 }
 
-function savePersistedDoc(doc) {
+function savePersistedDoc(doc, updatedAt) {
   try {
+    const state = buildAppState(doc, updatedAt, { storage: 'localStorage' })
     globalThis.localStorage?.setItem(
       STORAGE_KEY,
       JSON.stringify({
         version: STORAGE_VERSION,
-        savedAt: Date.now(),
-        doc,
+        updatedAt: state.updatedAt,
+        todos: state.todos,
+        meta: state.meta,
       }),
     )
   } catch {
@@ -132,13 +174,143 @@ function cloneDoc(doc) {
   return JSON.parse(JSON.stringify(doc))
 }
 
+function isIndexedDBAvailable() {
+  return typeof indexedDB !== 'undefined'
+}
+
+function requestToPromise(request) {
+  return new Promise((resolve, reject) => {
+    request.onsuccess = () => resolve(request.result)
+    request.onerror = () => reject(request.error)
+  })
+}
+
+function waitForTransaction(tx) {
+  return new Promise((resolve, reject) => {
+    tx.oncomplete = () => resolve()
+    tx.onerror = () => reject(tx.error)
+    tx.onabort = () => reject(tx.error)
+  })
+}
+
+function openBackupDb() {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(BACKUP_DB_NAME, 1)
+    request.onupgradeneeded = () => {
+      const db = request.result
+      if (!db.objectStoreNames.contains(BACKUP_STORE)) {
+        const store = db.createObjectStore(BACKUP_STORE, { keyPath: 'id' })
+        store.createIndex('createdAt', 'createdAt')
+      }
+    }
+    request.onsuccess = () => resolve(request.result)
+    request.onerror = () => reject(request.error)
+  })
+}
+
+async function listSnapshotsIdb() {
+  const db = await openBackupDb()
+  const tx = db.transaction(BACKUP_STORE, 'readonly')
+  const store = tx.objectStore(BACKUP_STORE)
+  const result = await requestToPromise(store.getAll())
+  await waitForTransaction(tx)
+  db.close()
+  return result
+}
+
+async function writeSnapshotIdb(snapshot) {
+  const db = await openBackupDb()
+  const tx = db.transaction(BACKUP_STORE, 'readwrite')
+  const store = tx.objectStore(BACKUP_STORE)
+  await requestToPromise(store.put(snapshot))
+  await waitForTransaction(tx)
+  db.close()
+}
+
+async function deleteSnapshotsIdb(ids) {
+  if (ids.length === 0) return
+  const db = await openBackupDb()
+  const tx = db.transaction(BACKUP_STORE, 'readwrite')
+  const store = tx.objectStore(BACKUP_STORE)
+  ids.forEach((id) => store.delete(id))
+  await waitForTransaction(tx)
+  db.close()
+}
+
+function loadSnapshotsLocal() {
+  try {
+    const raw = globalThis.localStorage?.getItem(BACKUP_STORAGE_KEY)
+    if (!raw) return []
+    const parsed = JSON.parse(raw)
+    return Array.isArray(parsed) ? parsed : []
+  } catch {
+    return []
+  }
+}
+
+function saveSnapshotsLocal(entries) {
+  try {
+    const serialized = JSON.stringify(entries)
+    if (serialized.length > MAX_BACKUP_BYTES) {
+      return { ok: false, error: 'Backup is too large for local storage.' }
+    }
+    globalThis.localStorage?.setItem(BACKUP_STORAGE_KEY, serialized)
+    return { ok: true }
+  } catch {
+    return { ok: false, error: 'Unable to store backups in local storage.' }
+  }
+}
+
+function formatFilenameTimestamp(date) {
+  const pad = (value) => value.toString().padStart(2, '0')
+  const yyyy = date.getFullYear()
+  const mm = pad(date.getMonth() + 1)
+  const dd = pad(date.getDate())
+  const hh = pad(date.getHours())
+  const min = pad(date.getMinutes())
+  const ss = pad(date.getSeconds())
+  return `${yyyy}${mm}${dd}-${hh}${min}${ss}`
+}
+
+function formatDisplayDate(value) {
+  if (!value) return 'Unknown time'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return 'Unknown time'
+  return date.toLocaleString()
+}
+
+function validateBackupPayload(payload) {
+  if (!payload || typeof payload !== 'object') {
+    return { error: 'Backup file must be a JSON object.' }
+  }
+  if (payload.version !== APP_STATE_VERSION) {
+    return { error: `Unsupported backup version: ${payload.version}` }
+  }
+  if (!payload.updatedAt) {
+    return { error: 'Backup is missing updatedAt.' }
+  }
+  const updatedAtMs = parseUpdatedAt(payload.updatedAt)
+  if (!updatedAtMs) {
+    return { error: 'Backup updatedAt is not a valid timestamp.' }
+  }
+  const normalized = normalizeDoc(payload.todos)
+  if (!normalized) {
+    return { error: 'Backup todos are not in the expected format.' }
+  }
+  return {
+    doc: normalized,
+    updatedAtMs,
+    meta: payload.meta ?? {},
+  }
+}
+
 function historyReducer(state, action) {
   switch (action.type) {
     case 'COMMIT': {
       const nextPast = [...state.past, state.present].slice(-MAX_HISTORY)
       return {
         past: nextPast,
-        present: { doc: action.doc, focusId: action.focusId },
+        present: { doc: action.doc, focusId: action.focusId, updatedAt: action.updatedAt },
         future: [],
       }
     }
@@ -277,17 +449,18 @@ function isItalic(e) {
 function initHistory() {
   const persisted = loadPersistedDoc()
   const doc =
-    persisted ?? ({
+    persisted?.doc ?? ({
       '90d': [createItem({ horizonKey: '90d' })],
       '30d': [createItem({ horizonKey: '30d' })],
       min: [createItem({ horizonKey: 'min' })],
     })
+  const updatedAt = persisted?.updatedAt ?? Date.now()
   const initialFocusId =
     doc.min[0]?.id ?? doc['30d'][0]?.id ?? doc['90d'][0]?.id ?? null
 
   return {
     past: [],
-    present: { doc, focusId: initialFocusId },
+    present: { doc, focusId: initialFocusId, updatedAt },
     future: [],
   }
 }
@@ -318,33 +491,56 @@ function App() {
 
   const doc = history.present.doc
   const focusId = history.present.focusId
+  const updatedAt = history.present.updatedAt
 
   const editorRefs = useRef(new Map())
   const listHostRefs = useRef(new Map())
   const pendingSelectionRestoreRef = useRef(null)
   const lastSavedSerializedRef = useRef(null)
+  const importInputRef = useRef(null)
 
   const [exportOpen, setExportOpen] = useState(false)
   const [copyStatus, setCopyStatus] = useState('')
+  const [backupEntries, setBackupEntries] = useState([])
+  const [backupError, setBackupError] = useState('')
+  const [importError, setImportError] = useState('')
+  const [importStatus, setImportStatus] = useState('')
 
   const export30dText = useMemo(() => {
     return toMarkmapText(doc['30d'])
   }, [doc])
 
-  function commit(nextDoc, nextFocusId) {
-    dispatch({ type: 'COMMIT', doc: nextDoc, focusId: nextFocusId })
+  function commit(nextDoc, nextFocusId, { updatedAt: nextUpdatedAt = Date.now() } = {}) {
+    dispatch({ type: 'COMMIT', doc: nextDoc, focusId: nextFocusId, updatedAt: nextUpdatedAt })
   }
 
   useEffect(() => {
-    const serialized = JSON.stringify(doc)
+    const serialized = JSON.stringify({ doc, updatedAt })
     if (lastSavedSerializedRef.current === null) {
       lastSavedSerializedRef.current = serialized
       return
     }
     if (lastSavedSerializedRef.current === serialized) return
     lastSavedSerializedRef.current = serialized
-    savePersistedDoc(doc)
-  }, [doc])
+    savePersistedDoc(doc, updatedAt)
+  }, [doc, updatedAt])
+
+  useEffect(() => {
+    let active = true
+    async function loadBackups() {
+      try {
+        const entries = isIndexedDBAvailable() ? await listSnapshotsIdb() : loadSnapshotsLocal()
+        const sorted = [...entries].sort((a, b) => b.createdAt - a.createdAt).slice(0, MAX_BACKUPS)
+        if (active) setBackupEntries(sorted)
+      } catch {
+        if (active) setBackupError('Unable to load backups from storage.')
+      }
+    }
+    loadBackups()
+    return () => {
+      active = false
+    }
+  }, [])
 
   useEffect(() => {
     globalThis.__MVP_QA__ = {
@@ -654,8 +850,173 @@ function App() {
     }
   }
 
+  function exportJson() {
+    const state = buildAppState(doc, updatedAt, { exportedAt: new Date().toISOString() })
+    const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `todo-backup-${formatFilenameTimestamp(new Date())}.json`
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    URL.revokeObjectURL(url)
+  }
+
+  function requestImport() {
+    setImportError('')
+    setImportStatus('')
+    importInputRef.current?.click()
+  }
+
+  async function handleImportFile(event) {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (!file) return
+    try {
+      const text = await file.text()
+      const parsed = JSON.parse(text)
+      const result = validateBackupPayload(parsed)
+      if (result.error) {
+        setImportError(result.error)
+        return
+      }
+      await applyBackup(result, {
+        sourceLabel: `Imported from ${file.name}`,
+        confirmOnOlder: true,
+      })
+    } catch {
+      setImportError('Unable to read that backup file.')
+    }
+  }
+
+  async function applyBackup({ doc: nextDoc, updatedAtMs }, { sourceLabel, confirmOnOlder }) {
+    setImportError('')
+    setImportStatus('')
+    if (confirmOnOlder && updatedAtMs < updatedAt) {
+      const confirmed = window.confirm(
+        `This backup is older than your current data (${formatDisplayDate(updatedAt)}). Import anyway?`,
+      )
+      if (!confirmed) return
+    }
+    const nextFocusId =
+      nextDoc.min[0]?.id ?? nextDoc['30d'][0]?.id ?? nextDoc['90d'][0]?.id ?? null
+    commit(nextDoc, nextFocusId, { updatedAt: updatedAtMs })
+    setImportStatus(sourceLabel ?? 'Backup restored.')
+    window.setTimeout(() => setImportStatus(''), 1500)
+  }
+
+  async function refreshBackupEntries() {
+    const entries = isIndexedDBAvailable() ? await listSnapshotsIdb() : loadSnapshotsLocal()
+    const sorted = [...entries].sort((a, b) => b.createdAt - a.createdAt)
+    setBackupEntries(sorted.slice(0, MAX_BACKUPS))
+    return sorted
+  }
+
+  async function createSnapshot() {
+    setBackupError('')
+    try {
+      const snapshot = {
+        id: makeId(),
+        createdAt: Date.now(),
+        state: buildAppState(doc, updatedAt, { snapshot: true }),
+      }
+      if (isIndexedDBAvailable()) {
+        await writeSnapshotIdb(snapshot)
+        const entries = await refreshBackupEntries()
+        const excess = entries.slice(MAX_BACKUPS).map((entry) => entry.id)
+        await deleteSnapshotsIdb(excess)
+      } else {
+        const existing = loadSnapshotsLocal()
+        const next = [snapshot, ...existing].sort((a, b) => b.createdAt - a.createdAt)
+        const trimmed = next.slice(0, MAX_BACKUPS)
+        const result = saveSnapshotsLocal(trimmed)
+        if (!result.ok) {
+          setBackupError(result.error)
+          return
+        }
+        setBackupEntries(trimmed)
+      }
+      setImportStatus('Backup saved.')
+      window.setTimeout(() => setImportStatus(''), 1500)
+    } catch {
+      setBackupError('Unable to save backup.')
+    }
+  }
+
+  async function restoreSnapshot(snapshot) {
+    const result = validateBackupPayload(snapshot.state)
+    if (result.error) {
+      setBackupError(result.error)
+      return
+    }
+    await applyBackup(result, { sourceLabel: 'Backup restored', confirmOnOlder: true })
+  }
+
   return (
     <div className="appShell">
+      <section className="backupPanel" aria-label="Backup and restore">
+        <div className="backupHeader">
+          <div>
+            <h2 className="backupTitle">Backup &amp; Restore</h2>
+            <p className="backupSubtitle">
+              Export a JSON backup, import a file, or restore from a recent snapshot.
+            </p>
+          </div>
+          <div className="backupActions">
+            <button className="paneButton" type="button" onClick={createSnapshot}>
+              Backup now
+            </button>
+            <button className="paneButton" type="button" onClick={exportJson}>
+              Export JSON
+            </button>
+            <button className="paneButton" type="button" onClick={requestImport}>
+              Import JSON
+            </button>
+            <input
+              ref={importInputRef}
+              type="file"
+              accept="application/json"
+              onChange={handleImportFile}
+              hidden
+            />
+          </div>
+        </div>
+        <div className="backupMessages" role="status" aria-live="polite">
+          {backupError ? <p className="backupMessage backupMessage--error">{backupError}</p> : null}
+          {importError ? <p className="backupMessage backupMessage--error">{importError}</p> : null}
+          {importStatus ? <p className="backupMessage">{importStatus}</p> : null}
+        </div>
+        <div className="backupList">
+          {backupEntries.length === 0 ? (
+            <p className="backupEmpty">No local backups yet.</p>
+          ) : (
+            <ul className="backupItems">
+              {backupEntries.map((entry) => {
+                const updatedAtMs = parseUpdatedAt(entry.state?.updatedAt)
+                return (
+                  <li key={entry.id} className="backupItem">
+                    <div>
+                      <p className="backupItemTitle">Snapshot</p>
+                      <p className="backupItemMeta">
+                        Created {formatDisplayDate(entry.createdAt)} · Updated{' '}
+                        {formatDisplayDate(updatedAtMs)}
+                      </p>
+                    </div>
+                    <button
+                      className="paneButton"
+                      type="button"
+                      onClick={() => restoreSnapshot(entry)}
+                    >
+                      Restore
+                    </button>
+                  </li>
+                )
+              })}
+            </ul>
+          )}
+        </div>
+      </section>
       <main className="threePane" aria-label="Task horizons">
         {HORIZONS.map((horizon) => (
           <section key={horizon.key} className="pane" data-horizon={horizon.key}>
