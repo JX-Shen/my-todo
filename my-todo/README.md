@@ -7,6 +7,42 @@ This template provides a minimal setup to get React working in Vite with HMR and
 - Install: `npm ci`
 - Run: `npm run dev`
 
+## Backup & restore
+
+### Export JSON
+
+Use **Export JSON** in the Backup & Restore panel to download a backup file named:
+
+`todo-backup-YYYYMMDD-HHmmss.json`
+
+The JSON uses the canonical format:
+
+```json
+{
+  "version": 1,
+  "updatedAt": "2025-09-06T12:00:00.000Z",
+  "todos": { "90d": [], "30d": [], "min": [] },
+  "meta": { "source": "minimal-todo" }
+}
+```
+
+### Import JSON
+
+Use **Import JSON** to restore from a backup file. The app validates the schema and will show a friendly error if the file is invalid. If the backup’s `updatedAt` is older than your current state, you will be warned and asked to confirm before importing.
+
+### Local backup history
+
+Use **Backup now** to create a local snapshot. The app keeps the last 30 snapshots and lists them in the Backup & Restore panel with a **Restore** action.
+
+- Primary storage: IndexedDB (`minimal-todo-backups` / `snapshots`)
+- Fallback storage: localStorage (`minimal-todo:backups`, size-checked)
+- Main app state: localStorage (`minimal-todo:v1`)
+
+### Migration notes (future Supabase sync)
+
+- The `version` and `updatedAt` fields are intended for future server sync and conflict handling.
+- Backups are compatible as long as the `version` matches; if the version changes, a migration step will be required before sync.
+
 ## GitHub Pages hosting
 
 This repo deploys the app to GitHub Pages from the `main` branch using GitHub Actions.
