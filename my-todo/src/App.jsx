@@ -13,6 +13,7 @@ const STORAGE_VERSION = 1
 const APP_STATE_VERSION = 1
 const MAX_BACKUPS = 30
 const BACKUP_STORAGE_KEY = 'minimal-todo:backups'
+const PIN_STORAGE_KEY = 'minimal-todo:backup-pins'
 const BACKUP_DB_NAME = 'minimal-todo-backups'
 const BACKUP_STORE = 'snapshots'
 const MAX_BACKUP_BYTES = 4_000_000
@@ -279,6 +280,56 @@ function formatDisplayDate(value) {
   return date.toLocaleString()
 }
 
+function clamp(min, max, value) {
+  return Math.min(max, Math.max(min, value))
+}
+
+function loadPinnedIds() {
+  try {
+    const raw = globalThis.localStorage?.getItem(PIN_STORAGE_KEY)
+    if (!raw) return []
+    const parsed = JSON.parse(raw)
+    return Array.isArray(parsed) ? parsed.filter((id) => typeof id === 'string') : []
+  } catch {
+    return []
+  }
+}
+
+function savePinnedIds(ids) {
+  try {
+    globalThis.localStorage?.setItem(PIN_STORAGE_KEY, JSON.stringify(ids))
+  } catch {
+    // ignore storage errors
+  }
+}
+
+function areArraysEqual(left, right) {
+  if (left.length !== right.length) return false
+  return left.every((value, index) => value === right[index])
+}
+
+function sortSnapshotsNewestFirst(entries) {
+  return [...entries].sort((a, b) => b.createdAt - a.createdAt)
+}
+
+async function loadSnapshots() {
+  if (isIndexedDBAvailable()) {
+    const entries = await listSnapshotsIdb()
+    const sorted = sortSnapshotsNewestFirst(entries)
+    const trimmed = sorted.slice(0, MAX_BACKUPS)
+    const excessIds = sorted.slice(MAX_BACKUPS).map((entry) => entry.id)
+    await deleteSnapshotsIdb(excessIds)
+    return trimmed
+  }
+  const entries = loadSnapshotsLocal()
+  const sorted = sortSnapshotsNewestFirst(entries)
+  const trimmed = sorted.slice(0, MAX_BACKUPS)
+  if (!areArraysEqual(entries.map((entry) => entry.id), trimmed.map((entry) => entry.id))) {
+    saveSnapshotsLocal(trimmed)
+  }
+  return trimmed
+}
+
 function validateBackupPayload(payload) {
   if (!payload || typeof payload !== 'object') {
     return { error: 'Backup file must be a JSON object.' }
@@ -354,6 +405,40 @@ function flattenIds(items, out = []) {
     if (item.children.length > 0) flattenIds(item.children, out)
   }
   return out
+}
+
+function countTodosInItems(items, { supportsCompletion }) {
+  let total = 0
+  let done = 0
+  for (const item of items) {
+    total += 1
+    if (supportsCompletion && item.completed) done += 1
+    if (item.children.length > 0) {
+      const childCounts = countTodosInItems(item.children, { supportsCompletion })
+      total += childCounts.total
+      done += childCounts.done
+    }
+  }
+  return { total, done }
+}
+
+function summarizeSnapshot(snapshot) {
+  const metaSummary = snapshot?.state?.meta?.summary
+  if (metaSummary && Number.isFinite(metaSummary.totalTodos) && Number.isFinite(metaSummary.doneTodos)) {
+    return { total: metaSummary.totalTodos, done: metaSummary.doneTodos }
+  }
+  if (metaSummary && Number.isFinite(metaSummary.total) && Number.isFinite(metaSummary.done)) {
+    return { total: metaSummary.total, done: metaSummary.done }
+  }
+  const todos = snapshot?.state?.todos
+  if (!todos) return { total: 0, done: 0 }
+  const totals = countTodosInItems(todos['90d'] ?? [], { supportsCompletion: false })
+  const totals30 = countTodosInItems(todos['30d'] ?? [], { supportsCompletion: false })
+  const totalsMin = countTodosInItems(todos.min ?? [], { supportsCompletion: true })
+  return {
+    total: totals.total + totals30.total + totalsMin.total,
+    done: totals.done + totals30.done + totalsMin.done,
+  }
 }
 
 function getNodePath(root, node) {
@@ -498,17 +583,35 @@ function App() {
   const pendingSelectionRestoreRef = useRef(null)
   const lastSavedSerializedRef = useRef(null)
   const importInputRef = useRef(null)
+  const scrollRailRef = useRef(null)
 
   const [exportOpen, setExportOpen] = useState(false)
   const [copyStatus, setCopyStatus] = useState('')
   const [backupEntries, setBackupEntries] = useState([])
   const [backupError, setBackupError] = useState('')
+  const [pinStatus, setPinStatus] = useState('')
   const [importError, setImportError] = useState('')
   const [importStatus, setImportStatus] = useState('')
+  const [pinnedIds, setPinnedIds] = useState(() => loadPinnedIds())
+  const [scrollRailWidth, setScrollRailWidth] = useState(0)
 
   const export30dText = useMemo(() => {
     return toMarkmapText(doc['30d'])
   }, [doc])
+
+  const visibleCount = useMemo(() => {
+    const value = 4 + Math.floor((scrollRailWidth - 980) / 300)
+    return clamp(3, 8, value)
+  }, [scrollRailWidth])
+
+  const pinnedEntries = useMemo(() => {
+    const pinned = backupEntries.filter((entry) => pinnedIds.includes(entry.id))
+    return sortSnapshotsNewestFirst(pinned)
+  }, [backupEntries, pinnedIds])
+
+  const nonPinnedEntries = useMemo(() => {
+    return backupEntries.filter((entry) => !pinnedIds.includes(entry.id))
+  }, [backupEntries, pinnedIds])
 
   function commit(nextDoc, nextFocusId, { updatedAt: nextUpdatedAt = Date.now() } = {}) {
     dispatch({ type: 'COMMIT', doc: nextDoc, focusId: nextFocusId, updatedAt: nextUpdatedAt })
@@ -529,8 +632,7 @@ function App() {
     let active = true
     async function loadBackups() {
       try {
-        const entries = isIndexedDBAvailable() ? await listSnapshotsIdb() : loadSnapshotsLocal()
-        const sorted = [...entries].sort((a, b) => b.createdAt - a.createdAt).slice(0, MAX_BACKUPS)
+        const sorted = await loadSnapshots()
         if (active) setBackupEntries(sorted)
       } catch {
         if (active) setBackupError('Unable to load backups from storage.')
@@ -541,6 +643,27 @@ function App() {
       active = false
     }
   }, [])
+
+  useEffect(() => {
+    setPinnedIds((prev) => {
+      const allowed = prev.filter((id) => backupEntries.some((entry) => entry.id === id))
+      return areArraysEqual(prev, allowed) ? prev : allowed
+    })
+  }, [backupEntries])
+
+  useEffect(() => {
+    savePinnedIds(pinnedIds)
+  }, [pinnedIds])
+
+  useLayoutEffect(() => {
+    const el = scrollRailRef.current
+    if (!el || typeof ResizeObserver === 'undefined') return
+    const updateWidth = () => setScrollRailWidth(el.clientWidth)
+    updateWidth()
+    const observer = new ResizeObserver(updateWidth)
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [nonPinnedEntries.length])
 
   useEffect(() => {
     globalThis.__MVP_QA__ = {
@@ -906,12 +1029,56 @@ function App() {
     window.setTimeout(() => setImportStatus(''), 1500)
   }
 
+  function exportSnapshot(entry) {
+    const blob = new Blob([JSON.stringify(entry.state, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `todo-snapshot-${formatFilenameTimestamp(new Date(entry.createdAt))}.json`
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    URL.revokeObjectURL(url)
+  }
+
+  function flashPinStatus(message) {
+    setPinStatus(message)
+    window.setTimeout(() => setPinStatus(''), 1500)
+  }
+
+  function togglePin(id) {
+    setPinnedIds((prev) => {
+      if (prev.includes(id)) {
+        flashPinStatus('Snapshot unpinned.')
+        return prev.filter((pinId) => pinId !== id)
+      }
+      if (prev.length >= 2) {
+        flashPinStatus('Only two snapshots can be pinned.')
+        return prev
+      }
+      flashPinStatus('Snapshot pinned.')
+      return [...prev, id]
+    })
+  }
+
+  function handleRailWheel(event) {
+    const el = scrollRailRef.current
+    if (!el) return
+    if (el.scrollWidth <= el.clientWidth) return
+    event.preventDefault()
+    el.scrollLeft += event.deltaY
+  }
+
   async function refreshBackupEntries() {
-    const entries = isIndexedDBAvailable() ? await listSnapshotsIdb() : loadSnapshotsLocal()
-    const sorted = [...entries].sort((a, b) => b.createdAt - a.createdAt)
-    setBackupEntries(sorted.slice(0, MAX_BACKUPS))
+    const sorted = await loadSnapshots()
+    setBackupEntries(sorted)
     return sorted
   }
+
+  useEffect(() => {
+    const el = scrollRailRef.current
+    if (el) el.scrollLeft = 0
+  }, [nonPinnedEntries.length])
 
   async function createSnapshot() {
     setBackupError('')
@@ -923,12 +1090,10 @@ function App() {
       }
       if (isIndexedDBAvailable()) {
         await writeSnapshotIdb(snapshot)
-        const entries = await refreshBackupEntries()
-        const excess = entries.slice(MAX_BACKUPS).map((entry) => entry.id)
-        await deleteSnapshotsIdb(excess)
+        await refreshBackupEntries()
       } else {
         const existing = loadSnapshotsLocal()
-        const next = [snapshot, ...existing].sort((a, b) => b.createdAt - a.createdAt)
+        const next = sortSnapshotsNewestFirst([snapshot, ...existing])
         const trimmed = next.slice(0, MAX_BACKUPS)
         const result = saveSnapshotsLocal(trimmed)
         if (!result.ok) {
@@ -945,12 +1110,16 @@ function App() {
   }
 
   async function restoreSnapshot(snapshot) {
+    const confirmed = window.confirm(
+      `Restore snapshot from ${formatDisplayDate(snapshot.createdAt)}? This will overwrite your current todos.`,
+    )
+    if (!confirmed) return
     const result = validateBackupPayload(snapshot.state)
     if (result.error) {
       setBackupError(result.error)
       return
     }
-    await applyBackup(result, { sourceLabel: 'Backup restored', confirmOnOlder: true })
+    await applyBackup(result, { sourceLabel: 'Backup restored.', confirmOnOlder: true })
   }
 
   return (
@@ -960,7 +1129,7 @@ function App() {
           <div>
             <h2 className="backupTitle">Backup &amp; Restore</h2>
             <p className="backupSubtitle">
-              Export a JSON backup, import a file, or restore from a recent snapshot.
+              Pin up to two snapshots, scroll recent backups, and restore when needed.
             </p>
           </div>
           <div className="backupActions">
@@ -968,7 +1137,7 @@ function App() {
               Backup now
             </button>
             <button className="paneButton" type="button" onClick={exportJson}>
-              Export JSON
+              Export current
             </button>
             <button className="paneButton" type="button" onClick={requestImport}>
               Import JSON
@@ -985,36 +1154,121 @@ function App() {
         <div className="backupMessages" role="status" aria-live="polite">
           {backupError ? <p className="backupMessage backupMessage--error">{backupError}</p> : null}
           {importError ? <p className="backupMessage backupMessage--error">{importError}</p> : null}
+          {pinStatus ? <p className="backupMessage">{pinStatus}</p> : null}
           {importStatus ? <p className="backupMessage">{importStatus}</p> : null}
         </div>
-        <div className="backupList">
-          {backupEntries.length === 0 ? (
-            <p className="backupEmpty">No local backups yet.</p>
-          ) : (
-            <ul className="backupItems">
-              {backupEntries.map((entry) => {
-                const updatedAtMs = parseUpdatedAt(entry.state?.updatedAt)
-                return (
-                  <li key={entry.id} className="backupItem">
-                    <div>
-                      <p className="backupItemTitle">Snapshot</p>
-                      <p className="backupItemMeta">
-                        Created {formatDisplayDate(entry.createdAt)} · Updated{' '}
-                        {formatDisplayDate(updatedAtMs)}
-                      </p>
+        <div className="backupRail">
+          <div className="backupPinned">
+            <div className="backupRailHeader">
+              <h3 className="backupRailTitle">Pinned</h3>
+              <p className="backupRailMeta">Max 2</p>
+            </div>
+            {pinnedEntries.length === 0 ? (
+              <p className="backupEmpty">No pinned snapshots yet.</p>
+            ) : (
+              <div className="backupCardList">
+                {pinnedEntries.map((entry) => {
+                  const summary = summarizeSnapshot(entry)
+                  return (
+                    <div key={entry.id} className="backupCard">
+                      <div className="backupCardBody">
+                        <p className="backupCardTitle">Snapshot</p>
+                        <p className="backupCardMeta">
+                          Created {formatDisplayDate(entry.createdAt)}
+                        </p>
+                        <p className="backupCardSummary">
+                          {summary.total} todos • {summary.done} done
+                        </p>
+                      </div>
+                      <div className="backupCardActions">
+                        <button
+                          className="paneButton"
+                          type="button"
+                          onClick={() => restoreSnapshot(entry)}
+                        >
+                          Restore
+                        </button>
+                        <button
+                          className="paneButton"
+                          type="button"
+                          onClick={() => exportSnapshot(entry)}
+                        >
+                          Export
+                        </button>
+                        <button
+                          className="paneButton paneButton--ghost"
+                          type="button"
+                          onClick={() => togglePin(entry.id)}
+                        >
+                          Unpin
+                        </button>
+                      </div>
                     </div>
-                    <button
-                      className="paneButton"
-                      type="button"
-                      onClick={() => restoreSnapshot(entry)}
-                    >
-                      Restore
-                    </button>
-                  </li>
-                )
-              })}
-            </ul>
-          )}
+                  )
+                })}
+              </div>
+            )}
+          </div>
+          <div className="backupScroll">
+            <div className="backupRailHeader">
+              <h3 className="backupRailTitle">Recent snapshots</h3>
+              <p className="backupRailMeta">{nonPinnedEntries.length} total</p>
+            </div>
+            {nonPinnedEntries.length === 0 ? (
+              <p className="backupEmpty">No local backups yet.</p>
+            ) : (
+              <div
+                className="backupScrollViewport"
+                ref={scrollRailRef}
+                onWheel={handleRailWheel}
+              >
+                <div
+                  className="backupScrollInner"
+                  style={{ '--visible-count': visibleCount }}
+                >
+                  {nonPinnedEntries.map((entry) => {
+                    const summary = summarizeSnapshot(entry)
+                    return (
+                      <div key={entry.id} className="backupCard">
+                        <div className="backupCardBody">
+                          <p className="backupCardTitle">Snapshot</p>
+                          <p className="backupCardMeta">
+                            Created {formatDisplayDate(entry.createdAt)}
+                          </p>
+                          <p className="backupCardSummary">
+                            {summary.total} todos • {summary.done} done
+                          </p>
+                        </div>
+                        <div className="backupCardActions">
+                          <button
+                            className="paneButton"
+                            type="button"
+                            onClick={() => restoreSnapshot(entry)}
+                          >
+                            Restore
+                          </button>
+                          <button
+                            className="paneButton"
+                            type="button"
+                            onClick={() => exportSnapshot(entry)}
+                          >
+                            Export
+                          </button>
+                          <button
+                            className="paneButton paneButton--ghost"
+                            type="button"
+                            onClick={() => togglePin(entry.id)}
+                          >
+                            Pin
+                          </button>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       </section>
       <main className="threePane" aria-label="Task horizons">

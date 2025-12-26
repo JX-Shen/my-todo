@@ -116,8 +116,45 @@
   color: #b42318;
 }
 
-.backupList {
+.backupRail {
   margin-top: 12px;
+  display: flex;
+  gap: 12px;
+  align-items: stretch;
+}
+
+.backupPinned {
+  flex: 0 0 240px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.backupScroll {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.backupRailHeader {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.backupRailTitle {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.backupRailMeta {
+  margin: 0;
+  font-size: 11px;
+  color: var(--text-muted);
 }
 
 .backupEmpty {
@@ -126,33 +163,71 @@
   color: var(--text-muted);
 }
 
-.backupItems {
-  list-style: none;
-  padding: 0;
-  margin: 0;
+.backupCardList {
   display: grid;
-  gap: 8px;
+  gap: 10px;
 }
 
-.backupItem {
+.backupScrollViewport {
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-bottom: 4px;
+}
+
+.backupScrollInner {
+  --card-gap: 12px;
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: calc(
+    (100% - (var(--card-gap) * (var(--visible-count) - 1))) / var(--visible-count)
+  );
+  gap: var(--card-gap);
+  min-height: 100%;
+}
+
+.backupCard {
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: 12px;
   padding: 10px;
+  background: var(--panel-bg);
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
 }
 
-.backupItemTitle {
+.backupCardBody {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.backupCardTitle {
   margin: 0;
   font-size: 13px;
   font-weight: 600;
 }
 
-.backupItemMeta {
-  margin: 4px 0 0;
+.backupCardMeta {
+  margin: 0;
   font-size: 12px;
+  color: var(--text-muted);
+}
+
+.backupCardSummary {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.backupCardActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.paneButton--ghost {
+  background: transparent;
   color: var(--text-muted);
 }
 
@@ -267,4 +342,14 @@
   color: var(--text);
   background: rgba(17, 24, 39, 0.02);
   resize: vertical;
+}
+
+@media (max-width: 900px) {
+  .backupRail {
+    flex-direction: column;
+  }
+
+  .backupPinned {
+    flex: 1 1 auto;
+  }
 }
