@@ -9,9 +9,9 @@ This template provides a minimal setup to get React working in Vite with HMR and
 
 ## Backup & restore
 
-### Export JSON
+### Export current
 
-Use **Export JSON** in the Backup & Restore panel to download a backup file named:
+Use **Export current** in the Backup & Restore panel to download a backup file named:
 
 `todo-backup-YYYYMMDD-HHmmss.json`
 
@@ -38,10 +38,26 @@ Use **Backup now** to create a local snapshot. The app keeps the last 30 snapsho
 - Fallback storage: localStorage (`minimal-todo:backups`, size-checked)
 - Main app state: localStorage (`minimal-todo:v1`)
 
+### Backups rail behavior
+
+- Snapshot cap: 30 max, newest-first; oldest drops beyond 30 (enforced in storage).
+- Pinned rail: max 2 pinned snapshots, fixed at the far left and never scroll away.
+- Pin persistence: stored locally, separate from the snapshot JSON, keyed by snapshot id.
+- Scroll rail: non-pinned snapshots only, newest at the left, initial scroll shows newest.
+- Visible card rule (non-pinned only): `visibleCount = clamp(3, 8, 4 + floor((width - 980) / 300))` using the scroll-rail container width.
+- Wheel behavior: when the scroll rail overflows horizontally, mouse wheel moves it sideways and prevents page scroll; otherwise the page scrolls normally.
+
+### Restore / export / import usage
+
+- Restore: confirm before overwriting local state, then shows a toast message.
+- Export snapshot: each card exports its snapshot JSON only.
+- Import JSON: validates schema, warns if `updatedAt` is older than current, and allows force import.
+
 ### Migration notes (future Supabase sync)
 
 - The `version` and `updatedAt` fields are intended for future server sync and conflict handling.
 - Backups are compatible as long as the `version` matches; if the version changes, a migration step will be required before sync.
+- Snapshot schema is unchanged by this feature to keep future sync compatibility.
 
 ## GitHub Pages hosting
 
